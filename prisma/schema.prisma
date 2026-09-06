@@ -1,7 +1,16 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// SkillForge — personal learning system.
+//
+// How to read this file (PostgreSQL teaching notes):
+// - Each `model` becomes one Postgres table.
+// - `String @id @default(cuid())` = TEXT primary key, app-generated ID.
+// - `@unique` creates a UNIQUE constraint + btree index.
+// - `@@index([...])` creates a btree index for fast WHERE / JOIN / ORDER BY.
+// - `@@unique([...])` creates a composite UNIQUE constraint.
+// - Relations (`Skill @relation(...)`) become FOREIGN KEY constraints.
+// - `onDelete: Cascade` = deleting the parent deletes children (Postgres ON DELETE CASCADE).
+// - `onDelete: SetNull` = deleting the parent keeps the child, FK becomes NULL.
+// - `createdAt @default(now())` = DEFAULT now() timestamp.
+// - `updatedAt @updatedAt` = Prisma rewrites this on every update.
 
 generator client {
   provider = "prisma-client"
@@ -10,4 +19,386 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// ------------------------------------------------------------------
+// Enums — stored as native Postgres ENUM types. Prefer enums over
+// free-text strings when the set of values is small and fixed.
+// ------------------------------------------------------------------
+
+enum Difficulty {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  SHORT_ANSWER
+  TRUE_FALSE
+  CODE
+}
+
+enum SessionStatus {
+  ACTIVE
+  COMPLETED
+  ABANDONED
+}
+
+enum ReviewStatus {
+  DUE
+  COMPLETED
+  SKIPPED
+}
+
+enum MasteryLevel {
+  NOT_STARTED
+  LEARNING
+  REVIEWING
+  MASTERED
+}
+
+enum StudyPlanStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum StudyItemStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  SKIPPED
+}
+
+enum InterviewCategory {
+  TECHNICAL
+  BEHAVIORAL
+  SYSTEM_DESIGN
+}
+
+enum ApplicationStatus {
+  WISHLIST
+  APPLIED
+  SCREENING
+  INTERVIEW
+  OFFER
+  REJECTED
+  ACCEPTED
+}
+
+// ------------------------------------------------------------------
+// User — the learner. Everything personal hangs off this table.
+// ------------------------------------------------------------------
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Personal data. All cascade: deleting a user wipes their history.
+  sessions     LearningSession[]
+  answers      Answer[]
+  reviews      Review[]
+  mistakes     Mistake[]
+  mastery      TopicMastery[]
+  studyPlans   StudyPlan[]
+  applications CareerApplication[]
+}
+
+// ------------------------------------------------------------------
+// Skill -> Topic -> Question — the global content catalog.
+// Skills and topics are shared by all users (not per-user copies).
+// ------------------------------------------------------------------
+model Skill {
+  id          String   @id @default(cuid())
+  slug        String   @unique // e.g. "javascript" — stable URL key
+  name        String   @unique // e.g. "JavaScript"
+  description String?
+  order       Int      @default(0) // display order in lists
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  topics   Topic[]
+  sessions LearningSession[]
+  plans    StudyPlan[]
+  // Interview questions can be loosely grouped by skill.
+  interviewQuestions InterviewQuestion[]
+
+  @@index([order])
+}
+
+model Topic {
+  id          String   @id @default(cuid())
+  skillId     String
+  skill       Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  slug        String // e.g. "js-closures" — unique only within its skill
+  name        String
+  description String?
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  questions          Question[]
+  mastery            TopicMastery[]
+  reviews            Review[]
+  mistakes           Mistake[]
+  studyItems         StudyPlanItem[]
+  interviewQuestions InterviewQuestion[]
+
+  // Same slug may repeat across skills, but not inside one skill.
+  @@unique([skillId, slug])
+  @@index([skillId, order])
+}
+
+// ------------------------------------------------------------------
+// TopicMastery — per-user mastery state for a topic.
+// This is a JOIN table (User <-> Topic) with extra columns.
+// ------------------------------------------------------------------
+model TopicMastery {
+  id           String       @id @default(cuid())
+  userId       String
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topicId      String
+  topic        Topic        @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  level        MasteryLevel @default(NOT_STARTED)
+  score        Int          @default(0) // 0-100, maintained by app code
+  lastStudiedAt DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  // One mastery row per (user, topic).
+  @@unique([userId, topicId])
+  @@index([userId, level])
+}
+
+// ------------------------------------------------------------------
+// Question + QuestionOption — practice questions.
+// Options are a separate table (relational), NOT a JSON array,
+// so Postgres can enforce "each option belongs to one question"
+// and we can point an Answer at the exact option chosen.
+// ------------------------------------------------------------------
+model Question {
+  id          String       @id @default(cuid())
+  topicId     String
+  topic       Topic        @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  type        QuestionType @default(MULTIPLE_CHOICE)
+  difficulty  Difficulty   @default(BEGINNER)
+  prompt      String       @db.Text
+  explanation String?      @db.Text
+  order       Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  options  QuestionOption[]
+  answers  Answer[]
+  reviews  Review[]
+  mistakes Mistake[]
+
+  @@index([topicId, order])
+  @@index([difficulty])
+}
+
+model QuestionOption {
+  id         String   @id @default(cuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  label      String   @db.Text // the option text
+  isCorrect  Boolean  @default(false)
+  order      Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  // Answers that picked this option. SetNull: deleting an option
+  // keeps the answer history, only clears the pointer.
+  answers Answer[]
+
+  @@index([questionId, order])
+}
+
+// ------------------------------------------------------------------
+// LearningSession + Answer — "a user sits down and answers questions".
+// ------------------------------------------------------------------
+model LearningSession {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skillId   String? // optional focus skill for the session
+  skill     Skill?        @relation(fields: [skillId], references: [id], onDelete: SetNull)
+  status    SessionStatus @default(ACTIVE)
+  startedAt DateTime      @default(now())
+  endedAt   DateTime?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  answers Answer[]
+
+  @@index([userId, startedAt(sort: Desc)])
+  @@index([status])
+}
+
+model Answer {
+  id               String          @id @default(cuid())
+  userId           String
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questionId       String
+  question         Question        @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  sessionId        String?
+  session          LearningSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  selectedOptionId String?
+  selectedOption   QuestionOption? @relation(fields: [selectedOptionId], references: [id], onDelete: SetNull)
+  textAnswer       String?         @db.Text // for SHORT_ANSWER / CODE
+  isCorrect        Boolean
+  createdAt        DateTime        @default(now())
+
+  // One answer row = one attempt. No unique constraint on purpose:
+  // retrying a question creates a new row (history is kept).
+  mistakes Mistake[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([questionId])
+  @@index([sessionId])
+}
+
+// ------------------------------------------------------------------
+// Review — spaced-repetition entry. "What should I restudy, and when?"
+// dueAt is the date the review becomes due.
+// ------------------------------------------------------------------
+model Review {
+  id            String       @id @default(cuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questionId    String?
+  question      Question?    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  topicId       String?
+  topic         Topic?       @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  dueAt         DateTime // the "due date" — query WHERE dueAt <= now()
+  status        ReviewStatus @default(DUE)
+  intervalDays  Int          @default(1) // SM-2 style interval
+  easeFactor    Float        @default(2.5)
+  lastReviewedAt DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  // Either questionId or topicId should be set (enforced in app code;
+  // Prisma has no CHECK-constraint support, so we keep both nullable).
+  @@index([userId, dueAt])
+  @@index([userId, status])
+  @@index([questionId])
+  @@index([topicId])
+}
+
+// ------------------------------------------------------------------
+// Mistake — a log of things the user got wrong.
+// Always belongs to a user; question/topic/answer are optional
+// context pointers (SetNull so deleting content keeps the log).
+// ------------------------------------------------------------------
+model Mistake {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questionId String?
+  question   Question? @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  topicId    String?
+  topic      Topic?   @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  answerId   String?
+  answer     Answer?  @relation(fields: [answerId], references: [id], onDelete: SetNull)
+  note       String   @db.Text
+  isResolved Boolean  @default(false)
+  resolvedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId, isResolved])
+  @@index([questionId])
+  @@index([topicId])
+}
+
+// ------------------------------------------------------------------
+// StudyPlan + StudyPlanItem — an ordered list of topics to study.
+// Items are rows (relational), not a JSON array, so each item can
+// have its own status and due date and can be queried/updated alone.
+// ------------------------------------------------------------------
+model StudyPlan {
+  id          String          @id @default(cuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skillId     String?
+  skill       Skill?          @relation(fields: [skillId], references: [id], onDelete: SetNull)
+  title       String
+  description String?         @db.Text
+  status      StudyPlanStatus @default(ACTIVE)
+  startDate   DateTime?       @db.Date
+  targetDate  DateTime?       @db.Date
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  items StudyPlanItem[]
+
+  @@index([userId, status])
+}
+
+model StudyPlanItem {
+  id          String          @id @default(cuid())
+  studyPlanId String
+  studyPlan   StudyPlan       @relation(fields: [studyPlanId], references: [id], onDelete: Cascade)
+  topicId     String
+  topic       Topic           @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  title       String // e.g. "Redo Hooks quiz and build a counter"
+  status      StudyItemStatus @default(PENDING)
+  dueDate     DateTime?       @db.Date
+  order       Int             @default(0)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  // Same topic should not appear twice in one plan.
+  @@unique([studyPlanId, topicId])
+  @@index([studyPlanId, order])
+}
+
+// ------------------------------------------------------------------
+// InterviewQuestion — interview prep, separate from practice Question.
+// Practice questions test knowledge; these model real interview prompts
+// (company, category, expected answer outline).
+// ------------------------------------------------------------------
+model InterviewQuestion {
+  id              String            @id @default(cuid())
+  skillId         String?
+  skill           Skill?            @relation(fields: [skillId], references: [id], onDelete: SetNull)
+  topicId         String?
+  topic           Topic?            @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  title           String
+  prompt          String            @db.Text
+  expectedAnswer  String?           @db.Text // outline, not a full script
+  difficulty      Difficulty        @default(INTERMEDIATE)
+  category        InterviewCategory @default(TECHNICAL)
+  company         String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([skillId])
+  @@index([topicId])
+  @@index([difficulty])
+  @@index([category])
+}
+
+// ------------------------------------------------------------------
+// CareerApplication — job applications for the user.
+// ------------------------------------------------------------------
+model CareerApplication {
+  id        String            @id @default(cuid())
+  userId    String
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company   String
+  role      String
+  status    ApplicationStatus @default(WISHLIST)
+  jobUrl    String?
+  notes     String?           @db.Text
+  appliedAt DateTime?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@index([userId, status])
+  @@index([company])
 }
