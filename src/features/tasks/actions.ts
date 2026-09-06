@@ -10,19 +10,28 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/dal";
 import { db } from "@/lib/db";
 import {
-  canMarkMastered,
-  updateMasteryScore,
+  levelMeansAiHelp,
+  processAttempt,
+  usedAiToLevel,
+  type AiAssistLevel,
 } from "@/features/learning-engine";
-import type { Difficulty, MasteryLevel } from "@/generated/prisma/enums";
+import type {
+  AiAssistLevel as PrismaAiLevel,
+  Difficulty,
+  MasteryLevel,
+} from "@/generated/prisma/enums";
 
-const DAY_MS = 24 * 3600 * 1000;
 const MAX_NOTE_LENGTH = 1000;
 
 export interface AttemptMeta {
   confidence: number | null; // 1-5, null = not rated
-  usedAi: boolean;
+  usedAi: boolean; // legacy checkbox; kept, but aiAssistLevel wins when given
+  aiAssistLevel?: AiAssistLevel | null; // five levels; null = derive from usedAi
+  canExplain?: boolean | null; // false forces CANNOT_EXPLAIN signal
   perceivedDifficulty: Difficulty | null;
   mistakeNote: string;
+  whyWrong?: string;
+  mentalModel?: string;
 }
 
 export interface SubmitChoiceInput extends AttemptMeta {
@@ -72,6 +81,20 @@ function checkMeta(meta: AttemptMeta): void {
   if (meta.mistakeNote.length > MAX_NOTE_LENGTH) {
     throw new Error(`Mistake note must be under ${MAX_NOTE_LENGTH} characters.`);
   }
+  if (
+    meta.aiAssistLevel !== undefined &&
+    meta.aiAssistLevel !== null &&
+    !["INDEPENDENT", "HINT", "ATTEMPTED_THEN_AI", "AI_MOST", "CANNOT_EXPLAIN"].includes(
+      meta.aiAssistLevel,
+    )
+  ) {
+    throw new Error("AI assistance level is invalid.");
+  }
+  for (const field of [meta.whyWrong, meta.mentalModel] as const) {
+    if (field !== undefined && field.length > MAX_NOTE_LENGTH) {
+      throw new Error(`Mistake fields must be under ${MAX_NOTE_LENGTH} characters.`);
+    }
+  }
 }
 
 function checkId(value: string, name: string): void {
@@ -99,97 +122,141 @@ async function getOrCreateSession(
 }
 
 /**
- * Move mastery, spaced-repetition, and mistake state forward by one attempt.
- * Mastery moves in bounded steps (see learning-engine/mastery.ts), so a
- * single answer can never grant mastery.
+ * Resolve the five-level AI signal. Explicit level wins; otherwise fall
+ * back to the legacy checkbox. canExplain=false forces CANNOT_EXPLAIN.
  */
-async function syncMasteryAndReview(
-  userId: string,
-  topicId: string,
-  questionId: string,
-  isCorrect: boolean,
-  now: Date,
-): Promise<void> {
-  const [mastery, topicAnswers, unresolvedMistakes, dueReviews] = await Promise.all([
-    db.topicMastery.findUnique({ where: { userId_topicId: { userId, topicId } } }),
-    db.answer.findMany({
-      where: { userId, question: { topicId } },
-      orderBy: { createdAt: "desc" },
-      take: 10,
-      select: { isCorrect: true },
-    }),
-    db.mistake.count({ where: { userId, topicId, isResolved: false } }),
-    db.review.count({
-      where: {
-        userId,
-        status: "DUE",
-        dueAt: { lte: now },
-        OR: [{ topicId }, { question: { topicId } }],
-      },
-    }),
-  ]);
+function resolveAiLevel(meta: AttemptMeta): AiAssistLevel {
+  if (meta.canExplain === false) return "CANNOT_EXPLAIN";
+  if (meta.aiAssistLevel) return meta.aiAssistLevel;
+  return usedAiToLevel(meta.usedAi);
+}
 
-  const currentScore = mastery?.score ?? 0;
-  const attempts = await db.answer.count({
-    where: { userId, question: { topicId } },
-  });
-  const nextScore = updateMasteryScore({ currentScore, isCorrect, attempts });
+function toPrismaAiLevel(level: AiAssistLevel): PrismaAiLevel {
+  return level;
+}
+
+/**
+ * Move mastery, spaced-repetition, and mistake state forward by one attempt.
+ *
+ * Flow: Answer -> Evaluate (processAttempt, pure) -> persist mastery,
+ * review (1/3/7/14/30d by grade), and rich mistake row. Mastery moves in
+ * bounded steps, so a single answer can never grant mastery.
+ */
+async function syncMasteryAndReview(args: {
+  userId: string;
+  topicId: string;
+  questionId: string;
+  kind: "choice" | "self-mark";
+  selectedOptionId?: string;
+  correctOptionId?: string | null;
+  selfMarkedCorrect?: boolean;
+  aiLevel: AiAssistLevel;
+  now: Date;
+  mistakeContext?: {
+    question: string;
+    userAnswer: string;
+    correctAnswer: string | null;
+    explanation: string | null;
+    whyWrong: string;
+    mentalModel: string;
+  };
+}): Promise<{ isCorrect: boolean; grade: import("@/features/learning-engine").ReviewGrade }> {
+  const { userId, topicId, questionId, now } = args;
+  const [mastery, topicAnswers, unresolvedMistakes, dueReviews, totalAttempts, priorWrong] =
+    await Promise.all([
+      db.topicMastery.findUnique({ where: { userId_topicId: { userId, topicId } } }),
+      db.answer.findMany({
+        where: { userId, question: { topicId } },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+        select: { isCorrect: true, aiAssistLevel: true },
+      }),
+      db.mistake.count({ where: { userId, topicId, isResolved: false } }),
+      db.review.count({
+        where: {
+          userId,
+          status: "DUE",
+          dueAt: { lte: now },
+          OR: [{ topicId }, { question: { topicId } }],
+        },
+      }),
+      db.answer.count({ where: { userId, question: { topicId } } }),
+      db.answer.count({ where: { userId, questionId, isCorrect: false } }),
+    ]);
+
+  let streak = 0;
+  for (const attempt of topicAnswers) {
+    if (attempt.isCorrect) streak += 1;
+    else break;
+  }
   const recentAccuracy =
     topicAnswers.length > 0
       ? topicAnswers.filter((a) => a.isCorrect).length / topicAnswers.length
       : null;
-  const { eligible } = canMarkMastered({
-    score: nextScore,
-    attempts,
+
+  const outcome = processAttempt({
+    kind: args.kind,
+    selectedOptionId: args.selectedOptionId,
+    correctOptionId: args.correctOptionId,
+    selfMarkedCorrect: args.selfMarkedCorrect,
+    aiLevel: args.aiLevel,
+    currentScore: mastery?.score ?? 0,
+    topicAttempts: totalAttempts,
+    correctStreak: streak,
     recentAccuracy,
     unresolvedMistakes,
     dueReviewsCount: dueReviews,
+    recentAiLevels: topicAnswers
+      .slice(0, 10)
+      .map((a) => (a.aiAssistLevel as AiAssistLevel | null) ?? "INDEPENDENT"),
+    now,
+    mistakeContext: args.mistakeContext
+      ? { ...args.mistakeContext, priorWrongCount: priorWrong }
+      : undefined,
   });
 
   let level: MasteryLevel = "LEARNING";
-  if (eligible) level = "MASTERED";
-  else if (attempts === 0) level = "NOT_STARTED";
-  else if (nextScore >= 50) level = "REVIEWING";
+  if (outcome.masteredEligible) level = "MASTERED";
+  else if (totalAttempts === 0) level = "NOT_STARTED";
+  else if (outcome.nextScore >= 50) level = "REVIEWING";
 
   await db.topicMastery.upsert({
     where: { userId_topicId: { userId, topicId } },
-    create: { userId, topicId, level, score: nextScore, lastStudiedAt: now },
-    update: { level, score: nextScore, lastStudiedAt: now },
+    create: { userId, topicId, level, score: outcome.nextScore, lastStudiedAt: now },
+    update: { level, score: outcome.nextScore, lastStudiedAt: now },
   });
 
-  // Spaced repetition, SM-2 lite: a correct answer doubles the interval
-  // (capped at 60 days); a wrong answer resets it to tomorrow.
+  // Review scheduling by grade: HARD 1d, NEEDS_WORK 3d, GOOD 7d,
+  // STRONG 14d, MASTERED 30d. Due reviews appear on the dashboard.
   const existingReview = await db.review.findFirst({
     where: { userId, questionId, status: "DUE" },
     orderBy: { dueAt: "asc" },
   });
   if (existingReview) {
-    const intervalDays = isCorrect
-      ? Math.min(60, Math.max(2, existingReview.intervalDays * 2))
-      : 1;
     await db.review.update({
       where: { id: existingReview.id },
       data: {
-        intervalDays,
-        dueAt: new Date(now.getTime() + intervalDays * DAY_MS),
+        grade: outcome.refinedGrade,
+        intervalDays: outcome.reviewPlan.intervalDays,
+        dueAt: outcome.reviewPlan.dueAt,
         lastReviewedAt: now,
-        easeFactor: isCorrect
-          ? Math.min(3, existingReview.easeFactor + 0.1)
-          : Math.max(1.3, existingReview.easeFactor - 0.2),
       },
     });
-  } else if (!isCorrect) {
+  } else {
     await db.review.create({
       data: {
         userId,
         questionId,
         topicId,
-        dueAt: new Date(now.getTime() + DAY_MS),
+        dueAt: outcome.reviewPlan.dueAt,
         status: "DUE",
-        intervalDays: 1,
+        grade: outcome.refinedGrade,
+        intervalDays: outcome.reviewPlan.intervalDays,
       },
     });
   }
+
+  return { isCorrect: outcome.evaluation.isCorrect, grade: outcome.refinedGrade };
 }
 
 async function maybeCreateMistake(args: {
@@ -198,16 +265,56 @@ async function maybeCreateMistake(args: {
   questionId: string;
   answerId: string;
   note: string;
+  isCorrect: boolean;
+  questionText: string;
+  userAnswer: string;
+  correctAnswer: string | null;
+  explanation: string | null;
+  whyWrong: string;
+  mentalModel: string;
+  grade: import("@/features/learning-engine").ReviewGrade;
+  now: Date;
 }): Promise<void> {
-  const note = args.note.trim();
-  if (note.length === 0) return;
+  // Correct answers leave no mistake row. Wrong answers without any note
+  // still leave a row so repeats escalate severity and priority.
+  if (args.isCorrect) {
+    const note = args.note.trim();
+    if (note.length === 0) return;
+  }
+  const priorWrong = await db.answer.count({
+    where: { userId: args.userId, questionId: args.questionId, isCorrect: false },
+  });
+  // priorWrong includes the just-stored wrong row when isCorrect=false,
+  // so subtract it to get the count before this attempt.
+  const priorBefore = args.isCorrect ? priorWrong : Math.max(0, priorWrong - 1);
+  const { buildMistakeRecord } = await import("@/features/learning-engine");
+  const record = buildMistakeRecord({
+    question: args.questionText,
+    userAnswer: args.userAnswer,
+    correctAnswer: args.correctAnswer,
+    explanation: args.explanation,
+    whyWrong: args.whyWrong || args.note.trim() || "(no reason given)",
+    mentalModel: args.mentalModel || "(no mental model noted)",
+    priorWrongCount: priorBefore,
+    grade: args.grade,
+    now: args.now,
+  });
   await db.mistake.create({
     data: {
       userId: args.userId,
       topicId: args.topicId,
       questionId: args.questionId,
       answerId: args.answerId,
-      note,
+      note: args.note.trim() || args.whyWrong.trim() || "Wrong answer — see linked attempt.",
+      questionText: record.question,
+      userAnswer: record.userAnswer,
+      correctAnswer: record.correctAnswer,
+      explanation: record.explanation,
+      whyWrong: record.whyWrong,
+      mentalModel: record.mentalModel,
+      severity: record.severity,
+      repeatCount: record.repeatCount,
+      nextReviewAt: record.nextReview,
     },
   });
 }
@@ -225,9 +332,10 @@ export async function submitChoice(input: SubmitChoiceInput): Promise<SubmitResu
     select: {
       id: true,
       topicId: true,
+      prompt: true,
       explanation: true,
       topic: { select: { skillId: true } },
-      options: { select: { id: true, isCorrect: true } },
+      options: { select: { id: true, label: true, isCorrect: true } },
     },
   });
   if (!question) throw new Error("Question not found.");
@@ -235,6 +343,7 @@ export async function submitChoice(input: SubmitChoiceInput): Promise<SubmitResu
   if (!picked) throw new Error("That choice does not belong to this question.");
   const correct = question.options.find((o) => o.isCorrect) ?? null;
   const isCorrect = picked.isCorrect;
+  const aiLevel = resolveAiLevel(input);
 
   const sessionId = await getOrCreateSession(user.id, question.topic.skillId, now);
   const answer = await db.answer.create({
@@ -245,19 +354,49 @@ export async function submitChoice(input: SubmitChoiceInput): Promise<SubmitResu
       selectedOptionId: picked.id,
       isCorrect,
       confidence: input.confidence,
-      usedAi: input.usedAi,
+      usedAi: levelMeansAiHelp(aiLevel) || input.usedAi,
+      aiAssistLevel: toPrismaAiLevel(aiLevel),
+      canExplain: input.canExplain ?? null,
       perceivedDifficulty: input.perceivedDifficulty,
     },
     select: { id: true },
   });
 
-  await syncMasteryAndReview(user.id, question.topicId, question.id, isCorrect, now);
+  const { grade } = await syncMasteryAndReview({
+    userId: user.id,
+    topicId: question.topicId,
+    questionId: question.id,
+    kind: "choice",
+    selectedOptionId: picked.id,
+    correctOptionId: correct?.id ?? null,
+    aiLevel,
+    now,
+    mistakeContext: isCorrect
+      ? undefined
+      : {
+          question: question.prompt,
+          userAnswer: picked.label,
+          correctAnswer: correct?.label ?? null,
+          explanation: question.explanation,
+          whyWrong: (input.whyWrong ?? "").trim() || input.mistakeNote,
+          mentalModel: (input.mentalModel ?? "").trim(),
+        },
+  });
   await maybeCreateMistake({
     userId: user.id,
     topicId: question.topicId,
     questionId: question.id,
     answerId: answer.id,
     note: input.mistakeNote,
+    isCorrect,
+    questionText: question.prompt,
+    userAnswer: picked.label,
+    correctAnswer: correct?.label ?? null,
+    explanation: question.explanation,
+    whyWrong: (input.whyWrong ?? "").trim(),
+    mentalModel: (input.mentalModel ?? "").trim(),
+    grade,
+    now,
   });
 
   revalidatePath("/dashboard");
@@ -310,11 +449,13 @@ export async function submitTextSelfMark(input: SubmitTextInput): Promise<Submit
     select: {
       id: true,
       topicId: true,
+      prompt: true,
       explanation: true,
       topic: { select: { skillId: true } },
     },
   });
   if (!question) throw new Error("Question not found.");
+  const aiLevel = resolveAiLevel(input);
 
   const sessionId = await getOrCreateSession(user.id, question.topic.skillId, now);
   const answer = await db.answer.create({
@@ -325,19 +466,48 @@ export async function submitTextSelfMark(input: SubmitTextInput): Promise<Submit
       textAnswer: input.textAnswer,
       isCorrect: input.wasCorrect,
       confidence: input.confidence,
-      usedAi: input.usedAi,
+      usedAi: levelMeansAiHelp(aiLevel) || input.usedAi,
+      aiAssistLevel: toPrismaAiLevel(aiLevel),
+      canExplain: input.canExplain ?? null,
       perceivedDifficulty: input.perceivedDifficulty,
     },
     select: { id: true },
   });
 
-  await syncMasteryAndReview(user.id, question.topicId, question.id, input.wasCorrect, now);
+  const { grade } = await syncMasteryAndReview({
+    userId: user.id,
+    topicId: question.topicId,
+    questionId: question.id,
+    kind: "self-mark",
+    selfMarkedCorrect: input.wasCorrect,
+    aiLevel,
+    now,
+    mistakeContext: input.wasCorrect
+      ? undefined
+      : {
+          question: question.prompt,
+          userAnswer: input.textAnswer,
+          correctAnswer: null,
+          explanation: question.explanation,
+          whyWrong: (input.whyWrong ?? "").trim() || input.mistakeNote,
+          mentalModel: (input.mentalModel ?? "").trim(),
+        },
+  });
   await maybeCreateMistake({
     userId: user.id,
     topicId: question.topicId,
     questionId: question.id,
     answerId: answer.id,
     note: input.mistakeNote,
+    isCorrect: input.wasCorrect,
+    questionText: question.prompt,
+    userAnswer: input.textAnswer,
+    correctAnswer: null,
+    explanation: question.explanation,
+    whyWrong: (input.whyWrong ?? "").trim(),
+    mentalModel: (input.mentalModel ?? "").trim(),
+    grade,
+    now,
   });
 
   revalidatePath("/dashboard");

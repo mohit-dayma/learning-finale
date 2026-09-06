@@ -20,6 +20,8 @@ import {
 import type { SubmitResult } from "@/features/tasks/actions";
 import type { TaskData } from "@/features/tasks/queries";
 import type { Difficulty } from "@/generated/prisma/enums";
+import { AI_ASSIST_LABELS, AI_ASSIST_LEVELS } from "@/features/learning-engine";
+import type { AiAssistLevel } from "@/features/learning-engine";
 
 const CONFIDENCE_OPTIONS = [1, 2, 3, 4, 5] as const;
 const EXPLANATION_FALLBACK =
@@ -32,10 +34,13 @@ function errorMessage(error: unknown): string {
 
 export function TaskRunner({ task }: { task: TaskData }) {
   const [confidence, setConfidence] = useState<number | null>(null);
-  const [usedAi, setUsedAi] = useState(false);
+  const [aiLevel, setAiLevel] = useState<AiAssistLevel>("INDEPENDENT");
+  const [canExplain, setCanExplain] = useState<boolean | null>(null);
   const [perceivedDifficulty, setPerceivedDifficulty] =
     useState<Difficulty | null>(null);
   const [mistakeNote, setMistakeNote] = useState("");
+  const [whyWrong, setWhyWrong] = useState("");
+  const [mentalModel, setMentalModel] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SubmitResult | null>(null);
@@ -70,9 +75,13 @@ export function TaskRunner({ task }: { task: TaskData }) {
         questionId: task.questionId,
         selectedOptionId,
         confidence,
-        usedAi,
+        usedAi: aiLevel !== "INDEPENDENT",
+        aiAssistLevel: aiLevel,
+        canExplain,
         perceivedDifficulty,
         mistakeNote,
+        whyWrong,
+        mentalModel,
       });
       setSubmittedChoiceId(selectedOptionId);
       setResult(res);
@@ -120,9 +129,13 @@ export function TaskRunner({ task }: { task: TaskData }) {
         textAnswer,
         wasCorrect,
         confidence,
-        usedAi,
+        usedAi: aiLevel !== "INDEPENDENT",
+        aiAssistLevel: aiLevel,
+        canExplain,
         perceivedDifficulty,
         mistakeNote,
+        whyWrong,
+        mentalModel,
       });
       setResult(res);
     } catch (err) {
@@ -161,13 +174,28 @@ export function TaskRunner({ task }: { task: TaskData }) {
           </div>
         </fieldset>
 
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium">How did you solve it?</span>
+          <select
+            className="w-full rounded-lg border border-border bg-background px-2.5 py-2 text-sm"
+            value={aiLevel}
+            onChange={(e) => setAiLevel(e.target.value as AiAssistLevel)}
+          >
+            {AI_ASSIST_LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {AI_ASSIST_LABELS[level]}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
-            checked={usedAi}
-            onChange={(e) => setUsedAi(e.target.checked)}
+            checked={canExplain === false}
+            onChange={(e) => setCanExplain(e.target.checked ? false : true)}
           />
-          I used AI help for this answer
+          I cannot explain this answer yet
         </label>
 
         <label className="block text-sm">
@@ -191,6 +219,30 @@ export function TaskRunner({ task }: { task: TaskData }) {
             <option value="INTERMEDIATE">Intermediate</option>
             <option value="ADVANCED">Advanced</option>
           </select>
+        </label>
+
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium">
+            Why was it wrong? (mistake log)
+          </span>
+          <textarea
+            className="min-h-20 w-full rounded-lg border border-border bg-background px-2.5 py-2 text-sm"
+            placeholder="Why was the answer wrong?"
+            value={whyWrong}
+            onChange={(e) => setWhyWrong(e.target.value)}
+          />
+        </label>
+
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium">
+            Mental model / rule to remember
+          </span>
+          <textarea
+            className="min-h-20 w-full rounded-lg border border-border bg-background px-2.5 py-2 text-sm"
+            placeholder="What rule fixes it next time?"
+            value={mentalModel}
+            onChange={(e) => setMentalModel(e.target.value)}
+          />
         </label>
 
         <label className="block text-sm">

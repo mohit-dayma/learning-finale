@@ -9,8 +9,10 @@
 
 import { db } from "@/lib/db";
 import {
+  aiAssistToScore,
   recommendToday,
   scoreToBand,
+  type AiAssistLevel,
   type DailyRecommendation,
   type MasteryBand,
   type TopicSignal,
@@ -155,6 +157,7 @@ export async function getDashboardData(
         select: {
           isCorrect: true,
           usedAi: true,
+          aiAssistLevel: true,
           createdAt: true,
           question: { select: { topicId: true } },
         },
@@ -270,6 +273,17 @@ export async function getDashboardData(
       if (attempt.isCorrect) streak += 1;
       else break;
     }
+    // Five-level AI dependence (falls back to the legacy boolean flag
+    // for rows written before aiAssistLevel existed).
+    const aiScores = recent.map((a) =>
+      a.aiAssistLevel != null
+        ? aiAssistToScore(a.aiAssistLevel as AiAssistLevel)
+        : a.usedAi
+          ? aiAssistToScore("ATTEMPTED_THEN_AI")
+          : 0,
+    );
+    const aiDependence =
+      aiScores.length > 0 ? aiScores.reduce((n, s) => n + s, 0) / aiScores.length : 0;
     const due = dueByTopic.get(topic.id) ?? [];
     const overdueDays = due.reduce((max, r) => {
       const days = Math.max(
@@ -294,10 +308,7 @@ export async function getDashboardData(
       overdueDays,
       unresolvedMistakes: unresolvedByTopic.get(topic.id) ?? 0,
       recentMistakeCount: recentMistakesByTopic.get(topic.id) ?? 0,
-      aiDependence:
-        recent.length > 0
-          ? recent.filter((a) => a.usedAi).length / recent.length
-          : 0,
+      aiDependence,
       interviewWeight: (interviewByTopic.get(topic.id) ?? 0) > 0 ? 0.8 : 0.2,
       lastStudiedAt: mastery?.lastStudiedAt ?? history[0]?.createdAt ?? null,
     };
