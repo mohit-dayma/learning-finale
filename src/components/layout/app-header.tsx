@@ -15,7 +15,7 @@ export function AppHeader({
           <Link href="/dashboard" className="font-semibold">
             SkillForge
           </Link>
-          <nav className="flex items-center gap-3 text-sm">
+          <nav aria-label="Primary" className="flex items-center gap-3 text-sm">
             <Link href="/dashboard" className="text-muted-foreground hover:text-foreground">
               Today
             </Link>

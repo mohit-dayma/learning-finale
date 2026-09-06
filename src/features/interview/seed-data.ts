@@ -1,7 +1,7 @@
 // Interview seed questions (wired into prisma/seed.ts by the main agent).
 //
-// 20 questions covering all 10 skill categories (>= 2 each) and all 5
-// formats (>= 1 each). topicSlug uses existing topic slugs where possible;
+// 50 questions covering all 14 skill categories (>= 2 each) and all 5
+// formats (>= 5 each). topicSlug uses existing topic slugs where possible;
 // system-design / ai-engineering / ai-evaluation use topicSlug null (the
 // main agent creates those skills/topics).
 
@@ -12,7 +12,7 @@ export interface InterviewSeedQuestion {
   prompt: string;
   expectedAnswer: string;
   difficulty: "BEGINNER" | "INTERMEDIATE" | "ADVANCED";
-  category: "TECHNICAL" | "SYSTEM_DESIGN";
+  category: "TECHNICAL" | "BEHAVIORAL" | "SYSTEM_DESIGN";
   format:
     | "TECHNICAL_EXPLANATION"
     | "CODING"
@@ -424,5 +424,605 @@ export const INTERVIEW_SEED_QUESTIONS: InterviewSeedQuestion[] = [
     followUpPrompt: "How do you tell noise from a real regression?",
     followUpExpected:
       "Confidence intervals plus repeated runs on fixed seeds.",
+  },
+  {
+    skillSlug: "ai",
+    topicSlug: "ai-prompt-embed",
+    title: "Reliable JSON from an LLM",
+    prompt:
+      "An interviewer asks: 'How do you get stable JSON out of an LLM for a signup form?' Answer as you would out loud in 2 minutes.",
+    expectedAnswer:
+      "Constrain the schema in the prompt, demand no extra text, validate and retry on parse failure, and prefer structured output modes when available.",
+    difficulty: "BEGINNER",
+    category: "TECHNICAL",
+    format: "TECHNICAL_EXPLANATION",
+    interviewWeight: 3,
+    keyPoints:
+      "State the exact schema and types in the prompt\nDemand no extra text outside the JSON\nValidate output and retry with the error\nUse structured output or function calling when available",
+    commonMisconceptions:
+      "A polite prompt alone guarantees valid JSON\nLonger prompts always parse better\nValidation is unnecessary with good prompts",
+    followUpPrompt: "What do you do when the model still returns prose around the JSON?",
+    followUpExpected:
+      "Extract the fenced block, re-prompt with the parse error, and fall back to a repair pass.",
+  },
+  {
+    skillSlug: "ai",
+    topicSlug: "ai-rag-basics",
+    title: "Hallucinating support bot",
+    prompt:
+      "Your support chatbot invents refund policies that do not exist. Walk through how you would ground it with RAG.",
+    expectedAnswer:
+      "Index the real policy docs, retrieve top chunks per question, cite them in the prompt, and refuse or escalate when nothing relevant is found.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "SCENARIO",
+    interviewWeight: 4,
+    keyPoints:
+      "Index the authoritative policy documents\nRetrieve top-k chunks for each question\nGround the prompt with cited context\nRefuse or escalate when retrieval finds nothing",
+    commonMisconceptions:
+      "RAG removes hallucinations entirely\nBigger chunks always help\nNo eval set is needed after adding RAG",
+    followUpPrompt: "How do you handle a policy update?",
+    followUpExpected:
+      "Re-index the changed docs and version the index with the eval set.",
+  },
+  {
+    skillSlug: "auth-security",
+    topicSlug: "auth-password-jwt-sessions",
+    title: "Storing passwords safely",
+    prompt:
+      "Explain how you store passwords for a new app: hashing, salting, and what you never do.",
+    expectedAnswer:
+      "Use a slow salted hash like bcrypt, scrypt, or argon2 with per-user salts, never store plaintext, and rate-limit login attempts.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "TECHNICAL_EXPLANATION",
+    interviewWeight: 5,
+    keyPoints:
+      "Slow salted hash such as bcrypt scrypt or argon2\nUnique salt per user built into the hash\nNever store plaintext or fast unsalted hashes\nRate-limit logins and constant-time compare",
+    commonMisconceptions:
+      "Base64 or MD5 is enough for passwords\nOne global salt is fine\nPlaintext helps password recovery",
+    followUpPrompt: "How do you migrate users from an old weak hash?",
+    followUpExpected:
+      "Re-hash on next successful login and flag migrated accounts.",
+  },
+  {
+    skillSlug: "auth-security",
+    topicSlug: "auth-password-jwt-sessions",
+    title: "JWT vs server sessions",
+    prompt:
+      "Compare JWTs and server-side sessions for a banking app versus a public read API. When would you use each?",
+    expectedAnswer:
+      "Use server sessions for banking for instant revocation, and short-lived JWTs for scalable reads, with refresh rotation and revocation lists where needed.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "TECHNICAL_EXPLANATION",
+    interviewWeight: 4,
+    keyPoints:
+      "Sessions revoke instantly and keep cookies small\nJWTs scale statelessly across services\nBanking needs revocation and short lifetimes\nUse refresh rotation and denylists for JWT logout",
+    commonMisconceptions:
+      "JWTs are encrypted by default\nStateless means revocation is free\nSessions cannot scale",
+    followUpPrompt: "How do you log a user out everywhere with JWTs?",
+    followUpExpected:
+      "Short access lifetime plus refresh rotation with a revocation list.",
+  },
+  {
+    skillSlug: "auth-security",
+    topicSlug: "auth-owasp-basics",
+    title: "XSS in user bios",
+    prompt:
+      "This profile page runs attacker scripts.\n```tsx\n<div dangerouslySetInnerHTML={{ __html: bio }} />\n```\nWhat is wrong and how do you fix it?",
+    expectedAnswer:
+      "Raw user HTML enables stored XSS. Render as text or sanitize with a strict allowlist and a content security policy.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "DEBUGGING",
+    interviewWeight: 4,
+    keyPoints:
+      "Raw user HTML runs as stored XSS\nRender as text or sanitize with an allowlist\nAdd a content security policy\nEscape output by default",
+    commonMisconceptions:
+      "Only login forms need XSS protection\nClient-side checks alone stop stored XSS\nSanitization is never needed with React",
+    followUpPrompt: "When is dangerouslySetInnerHTML ever acceptable?",
+    followUpExpected:
+      "Only for fully trusted sanitized markup, never raw user input.",
+  },
+  {
+    skillSlug: "auth-security",
+    topicSlug: "auth-oauth",
+    title: "Login with Google",
+    prompt:
+      "Design 'Log in with Google' for a web app and a mobile app: flow, PKCE, scopes, and where tokens live.",
+    expectedAnswer:
+      "Use authorization code with PKCE, minimal scopes, server-side code exchange, httpOnly session cookies, and state plus redirect validation.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "DESIGN",
+    interviewWeight: 4,
+    keyPoints:
+      "Authorization code flow with PKCE for public clients\nMinimal scopes and validated redirect URIs\nServer exchanges the code for tokens\nTokens live in httpOnly cookies or backend sessions",
+    commonMisconceptions:
+      "Ask users for their Google password\nPut the client secret in the frontend\nExtra scopes are harmless",
+    followUpPrompt: "How do you handle token refresh on mobile?",
+    followUpExpected:
+      "Secure storage with rotating refresh tokens and re-auth on reuse.",
+  },
+  {
+    skillSlug: "api-design",
+    topicSlug: "api-rest-versioning",
+    title: "What makes an API RESTful",
+    prompt:
+      "An interviewer asks: 'What makes an API RESTful?' Cover resources, methods, status codes, and statelessness in 2 minutes.",
+    expectedAnswer:
+      "Model nouns as resources, verbs as HTTP methods, use correct status codes, stay stateless, and keep URLs predictable with versioning for breaks.",
+    difficulty: "BEGINNER",
+    category: "TECHNICAL",
+    format: "TECHNICAL_EXPLANATION",
+    interviewWeight: 3,
+    keyPoints:
+      "Resources as plural nouns with HTTP verbs\nCorrect status codes like 201 and 404\nStateless requests carrying their own context\nVersioning for breaking changes",
+    commonMisconceptions:
+      "Any JSON over HTTP is REST\nVerbs belong in the URL\nStatus codes do not matter",
+    followUpPrompt: "When would you break REST and use RPC?",
+    followUpExpected:
+      "Actions that map poorly to resources, like transcoding or transfers.",
+  },
+  {
+    skillSlug: "api-design",
+    topicSlug: "api-pagination-filtering",
+    title: "Paginate a 10M-row feed",
+    prompt:
+      "Design GET /posts for a 10M-row feed: pagination, filtering, sorting, and why OFFSET alone fails.",
+    expectedAnswer:
+      "Use cursor pagination on a stable key, query-param filters and sort, limits plus total handling, and document next cursors.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "DESIGN",
+    interviewWeight: 4,
+    keyPoints:
+      "Cursor on a stable key instead of deep OFFSET\nFilters and sort as query params\nLimit plus next cursor in the response\nIndex the sort and filter columns",
+    commonMisconceptions:
+      "OFFSET stays fast at page 100000\nCursors require loading everything\nSorting needs no index",
+    followUpPrompt: "How do you keep pages stable when rows are inserted?",
+    followUpExpected:
+      "Cursor on createdAt plus id tiebreaker.",
+  },
+  {
+    skillSlug: "api-design",
+    topicSlug: "api-idempotency",
+    title: "Double charge on retry",
+    prompt:
+      "Users get double-charged when POST /payments is retried after a timeout. Design the idempotency fix end to end.",
+    expectedAnswer:
+      "Clients send an Idempotency-Key, the server stores the first result under it, replays it on retry, and expires keys safely.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "SCENARIO",
+    interviewWeight: 5,
+    keyPoints:
+      "Client generates an Idempotency-Key per intent\nServer stores the first result under the key\nRetries replay the stored result\nKeys expire and scope to the user",
+    commonMisconceptions:
+      "POST is idempotent by default\nClients should never retry\nDedup belongs only in the frontend",
+    followUpPrompt: "What if two different payments reuse the same key?",
+    followUpExpected:
+      "Reject with a key-reuse error scoped to user and fingerprint.",
+  },
+  {
+    skillSlug: "api-design",
+    topicSlug: "api-rest-versioning",
+    title: "Breaking change without a version",
+    prompt:
+      "A renamed field broke half your API consumers overnight. Walk through the response and how you version next time.",
+    expectedAnswer:
+      "Roll back or dual-serve the old field, communicate the window, then version with deprecation headers and a migration guide.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "DEBUGGING",
+    interviewWeight: 3,
+    keyPoints:
+      "Restore the old field or roll back first\nDual-serve with deprecation headers\nVersion breaking changes under v2\nPublish a migration guide and sunset date",
+    commonMisconceptions:
+      "Renames are always safe\nClients should read code daily\nVersions are never needed",
+    followUpPrompt: "How long do you keep v1 alive?",
+    followUpExpected:
+      "Until usage drops below the agreed threshold after notice.",
+  },
+  {
+    skillSlug: "production-engineering",
+    topicSlug: "prod-observability-logging",
+    title: "Logs metrics traces",
+    prompt:
+      "Explain logs, metrics, and traces to a junior: what each is and when you reach for it during a slow-checkout incident.",
+    expectedAnswer:
+      "Metrics alert on burn, traces find the slow hop across services, and structured logs explain the failing request.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "TECHNICAL_EXPLANATION",
+    interviewWeight: 4,
+    keyPoints:
+      "Metrics track health over time and alert\nTraces follow one request across services\nLogs explain single events with context\nRequest IDs tie all three together",
+    commonMisconceptions:
+      "Logs alone replace dashboards\nMetrics store full stack traces\nTracing is only for frontend",
+    followUpPrompt: "What do you add first when blind in an incident?",
+    followUpExpected:
+      "Request IDs plus structured logs at the failing hop.",
+  },
+  {
+    skillSlug: "production-engineering",
+    topicSlug: "prod-cicd-secrets",
+    title: "Secret committed to git",
+    prompt:
+      "An AWS key was committed to a public repo 2 hours ago and bots may have scraped it. Walk through your response.",
+    expectedAnswer:
+      "Revoke and rotate immediately, purge from history, scan for abuse, and add secret scanning plus vault-backed deploys.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "SCENARIO",
+    interviewWeight: 4,
+    keyPoints:
+      "Revoke and rotate the key immediately\nPurge from history and check for abuse\nAdd secret scanning to CI\nMove secrets to a vault with rotation",
+    commonMisconceptions:
+      "Deleting the commit is enough\nOnly the latest commit leaks\nRotation can wait",
+    followUpPrompt: "How do you prevent this next time?",
+    followUpExpected:
+      "Pre-commit hooks, CI scanning, and vault injection at deploy.",
+  },
+  {
+    skillSlug: "production-engineering",
+    topicSlug: "prod-slo-error-budgets",
+    title: "SLOs for checkout",
+    prompt:
+      "Define SLIs and SLOs for a checkout API: what you measure, targets, and what happens when the budget burns.",
+    expectedAnswer:
+      "Measure success rate and latency percentiles, set targets like 99.9 percent in 28 days, and freeze risky releases when the budget burns fast.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "DESIGN",
+    interviewWeight: 4,
+    keyPoints:
+      "SLIs for success rate and latency percentiles\nSLO targets over a rolling window\nError budget from the allowed failure rate\nBurn-rate alerts gate releases",
+    commonMisconceptions:
+      "100 percent uptime is a useful SLO\nAverages alone describe latency\nBudgets never change behavior",
+    followUpPrompt: "What do you do when the budget is gone?",
+    followUpExpected:
+      "Freeze features and spend capacity on reliability.",
+  },
+  {
+    skillSlug: "production-engineering",
+    topicSlug: "prod-observability-logging",
+    title: "Outage you debugged",
+    prompt:
+      "Tell me about a production outage you helped debug: your role, how you found the cause, and what changed afterward.",
+    expectedAnswer:
+      "Describe the symptom, your investigation with metrics traces and logs, the fix, and the runbook or alert that prevents repeats.",
+    difficulty: "INTERMEDIATE",
+    category: "BEHAVIORAL",
+    format: "SCENARIO",
+    interviewWeight: 3,
+    keyPoints:
+      "Clear role and timeline of the incident\nEvidence from metrics traces and logs\nRoot cause plus the actual fix\nFollow-up runbook test or alert",
+    commonMisconceptions:
+      "Blaming others is a good answer\nSkipping what you learned is fine\nNo follow-up is needed",
+    followUpPrompt: "What would you do differently next time?",
+    followUpExpected:
+      "Earlier escalation with better dashboards or runbooks.",
+  },
+  {
+    skillSlug: "javascript",
+    topicSlug: "js-event-loop-async",
+    title: "forEach with await bug",
+    prompt:
+      "This code finishes before saving all rows.\n```js\nrows.forEach(async (r) => { await save(r); });\nconsole.log('done');\n```\nWhy and how do you fix it?",
+    expectedAnswer:
+      "forEach does not await callbacks, so done logs early. Use for-of with await or Promise.all over mapped promises.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "DEBUGGING",
+    interviewWeight: 4,
+    keyPoints:
+      "forEach ignores returned promises\nDone logs before saves finish\nFix with for-of plus await\nOr Promise all over rows map for parallel saves",
+    commonMisconceptions:
+      "async forEach awaits each callback\nAdding await before forEach fixes it\nParallel and sequential are identical",
+    followUpPrompt: "When would you pick sequential for-of over Promise.all?",
+    followUpExpected:
+      "When order, rate limits, or DB pressure require one at a time.",
+  },
+  {
+    skillSlug: "typescript",
+    topicSlug: "ts-generics-utility",
+    title: "Typed pluck helper",
+    prompt:
+      "Write pluck(objs, key) that stays fully typed.\n```ts\nfunction pluck<T, K extends keyof T>(objs: T[], key: K): T[K][] {\n  // your code here\n}\n```",
+    expectedAnswer:
+      "Map over objs reading key, with K constrained to keyof T so the return infers as the field type.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "CODING",
+    interviewWeight: 4,
+    keyPoints:
+      "K extends keyof T constrains the key\nReturn type T of K array preserves field type\nMap over objs reading the key\nCallers get autocomplete and errors for bad keys",
+    commonMisconceptions:
+      "any is fine for helpers\nConstraints weaken type safety\nGenerics run at runtime",
+    followUpPrompt: "How would you type Omit with a union of keys?",
+    followUpExpected:
+      "Omit with Exclude of keyof T over the key union.",
+  },
+  {
+    skillSlug: "react",
+    topicSlug: "react-state-effects",
+    title: "Infinite fetch loop",
+    prompt:
+      "This component fetches forever.\n```tsx\nuseEffect(() => { fetch('/api/cart').then(r => r.json()).then(setCart); });\n```\nWhy and what is the minimal fix?",
+    expectedAnswer:
+      "No dep array reruns the effect after every setCart render. Add an empty array, or key the effect by the real input.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "DEBUGGING",
+    interviewWeight: 4,
+    keyPoints:
+      "Missing dep array runs after every render\nsetCart triggers another render and fetch\nFix with an empty array or real deps\nAdd cleanup to ignore stale responses",
+    commonMisconceptions:
+      "Effects run once by default\nsetState never triggers effects\nEmpty array always means a bug",
+    followUpPrompt: "When would you add a real dep instead of an empty array?",
+    followUpExpected:
+      "When the URL or user id drives the fetch.",
+  },
+  {
+    skillSlug: "react",
+    topicSlug: "react-performance",
+    title: "Performance win story",
+    prompt:
+      "Tell me about a time you made a React app faster: what was slow, what you changed, and how you proved it.",
+    expectedAnswer:
+      "Name the symptom, the profiler evidence, the fix like state scope or virtualization, and the before-after numbers.",
+    difficulty: "BEGINNER",
+    category: "BEHAVIORAL",
+    format: "TECHNICAL_EXPLANATION",
+    interviewWeight: 3,
+    keyPoints:
+      "Concrete slow interaction and its cause\nProfiler or timing evidence\nFix such as memo scope or virtualization\nBefore and after numbers",
+    commonMisconceptions:
+      "Vague claims without numbers convince\nPremature optimization everywhere helps\nTooling evidence does not matter",
+    followUpPrompt: "What would you do if the fix had not worked?",
+    followUpExpected:
+      "Re-profile, slice by component, and test the next bottleneck.",
+  },
+  {
+    skillSlug: "nextjs",
+    topicSlug: "nextjs-server-client-caching",
+    title: "Server-only import crash",
+    prompt:
+      "A 'use client' component imports a server-only db helper and the build fails. Diagnose and fix it.",
+    expectedAnswer:
+      "Client bundles cannot include server code. Move data reads to a Server Component and pass serializable props down.",
+    difficulty: "ADVANCED",
+    category: "TECHNICAL",
+    format: "DEBUGGING",
+    interviewWeight: 4,
+    keyPoints:
+      "Client bundle cannot include server modules\nMove reads to an async Server Component\nPass serializable props across the boundary\nKeep use client leaves small and low",
+    commonMisconceptions:
+      "use client can still import fs directly\nThe whole page must become client rendered\nProps can carry functions and sockets",
+    followUpPrompt: "How do you share types without sharing code?",
+    followUpExpected:
+      "Shared type-only modules with no runtime imports.",
+  },
+  {
+    skillSlug: "nextjs",
+    topicSlug: "nextjs-middleware-auth",
+    title: "Gate dashboard routes",
+    prompt:
+      "Design middleware protection for /dashboard: session checks, redirects, and edge constraints.",
+    expectedAnswer:
+      "Read the session cookie in middleware, redirect to login with a callback URL, and verify again in the route for sensitive data.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "DESIGN",
+    interviewWeight: 4,
+    keyPoints:
+      "Read and verify the session cookie in middleware\nRedirect to login with a return URL\nKeep middleware light for the edge\nRe-verify inside routes for sensitive reads",
+    commonMisconceptions:
+      "Middleware alone secures data fetching\nHeavy DB work belongs in middleware\nCookies never need verification",
+    followUpPrompt: "Where do you enforce role checks?",
+    followUpExpected:
+      "In the route or server action after identity is known.",
+  },
+  {
+    skillSlug: "backend",
+    topicSlug: "backend-middleware-validation",
+    title: "Validation middleware",
+    prompt:
+      "Write Express middleware that validates req.body with zod and returns 400 field errors.\n```ts\nimport { z } from 'zod';\nconst Signup = z.object({ email: z.string().email(), password: z.string().min(8) });\n// your middleware here\n```",
+    expectedAnswer:
+      "Safe-parse the body, call next on success, and return 400 with flattened field errors on failure.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "CODING",
+    interviewWeight: 4,
+    keyPoints:
+      "Safe parse req body against the schema\nCall next only on success\nReturn 400 with field-level errors\nKeep validation at the boundary",
+    commonMisconceptions:
+      "Throwing without a handler returns 400\nFrontend checks replace server checks\nValidation belongs after the write",
+    followUpPrompt: "How do you reuse this for many routes?",
+    followUpExpected:
+      "A higher-order validator that takes any schema.",
+  },
+  {
+    skillSlug: "backend",
+    topicSlug: "backend-background-jobs",
+    title: "Email job queue",
+    prompt:
+      "Design a welcome-email pipeline for 100k signups a day: queue, retries, and failure handling.",
+    expectedAnswer:
+      "Enqueue on signup, process with idempotent workers, backoff retries, and a dead-letter queue with alerts.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "DESIGN",
+    interviewWeight: 4,
+    keyPoints:
+      "Enqueue on signup and ack fast\nIdempotent workers with dedup keys\nExponential backoff with limited retries\nDead-letter queue plus alerts and replays",
+    commonMisconceptions:
+      "Send email inline in the request\nRetries never duplicate\nOne try is always enough",
+    followUpPrompt: "How do you survive a provider outage?",
+    followUpExpected:
+      "Backpressure, paused consumers, and replayable backlog.",
+  },
+  {
+    skillSlug: "postgresql",
+    topicSlug: "pg-transactions",
+    title: "Double-booked seats",
+    prompt:
+      "Two transactions both read 1 seat left and both insert bookings. Explain the anomaly and fix it with SQL.",
+    expectedAnswer:
+      "The read-check-write raced. Use a transaction with SELECT FOR UPDATE or a guarded UPDATE so only one booking commits.",
+    difficulty: "ADVANCED",
+    category: "TECHNICAL",
+    format: "SCENARIO",
+    interviewWeight: 4,
+    keyPoints:
+      "Concurrent reads both saw one seat\nFix with SELECT FOR UPDATE in a transaction\nOr guarded UPDATE with row count check\nUnique constraints as a backstop",
+    commonMisconceptions:
+      "READ COMMITTED alone prevents this\nApp-level checks are enough\nMore indexes fix races",
+    followUpPrompt: "When would you use SERIALIZABLE here?",
+    followUpExpected:
+      "When multi-row invariants must look sequential under contention.",
+  },
+  {
+    skillSlug: "system-design",
+    topicSlug: "sys-caching-cdn",
+    title: "Cache product pages",
+    prompt:
+      "Design caching for 1M product pages with daily price changes: layers, TTLs, and invalidation.",
+    expectedAnswer:
+      "Cache page fragments at the CDN with short TTLs, use cache-aside for product data, and invalidate by key on price writes with stale-while-revalidate.",
+    difficulty: "INTERMEDIATE",
+    category: "SYSTEM_DESIGN",
+    format: "DESIGN",
+    interviewWeight: 4,
+    keyPoints:
+      "CDN for static fragments with short TTLs\nCache-aside for product reads\nInvalidate by key on price writes\nStale-while-revalidate to avoid stampedes",
+    commonMisconceptions:
+      "Cache everything forever\nInvalidation is free and instant\nTTL alone handles price accuracy",
+    followUpPrompt: "How do you handle a flash sale spike?",
+    followUpExpected:
+      "Pre-warm, longer TTLs, and single-flight rebuilds.",
+  },
+  {
+    skillSlug: "system-design",
+    topicSlug: "sys-queues",
+    title: "Queue lag at checkout",
+    prompt:
+      "During a flash sale the order queue lags 20 minutes and the DB saturates. Walk through mitigation and redesign.",
+    expectedAnswer:
+      "Shed load with backpressure and cached reads, drain with autoscaled consumers, then add partitioning, idempotency, and circuit breakers.",
+    difficulty: "ADVANCED",
+    category: "SYSTEM_DESIGN",
+    format: "SCENARIO",
+    interviewWeight: 5,
+    keyPoints:
+      "Mitigate with load shedding and stale reads\nScale consumers and partition the queue\nIdempotent workers with dead-letter handling\nCircuit breakers and runbooks for next time",
+    commonMisconceptions:
+      "More retries always drain faster\nOne partition scales forever\nExactly-once is free",
+    followUpPrompt: "How do you avoid losing orders during the fix?",
+    followUpExpected:
+      "Durable queue with acks and replayable backlog.",
+  },
+  {
+    skillSlug: "dsa",
+    topicSlug: "dsa-trees-graphs",
+    title: "Shortest path in a graph",
+    prompt:
+      "Write bfsShortestPath(graph, start, end) returning the hop count or -1.\n```js\nfunction bfsShortestPath(graph, start, end) {\n  // graph: Record<string, string[]>; your code here\n}\n```",
+    expectedAnswer:
+      "BFS level by level with a visited set and queue gives O(V + E); the first visit to end is the shortest path.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "CODING",
+    interviewWeight: 4,
+    keyPoints:
+      "Queue plus visited set avoids repeats\nExpand level by level for shortest hops\nReturn depth when end is dequeued\nO(V + E) time and O(V) space",
+    commonMisconceptions:
+      "DFS also gives shortest paths\nVisited sets are optional\nBFS is always O(1)",
+    followUpPrompt: "How would you return the actual path?",
+    followUpExpected:
+      "Track parents and walk back from end to start.",
+  },
+  {
+    skillSlug: "ai-engineering",
+    topicSlug: "aieng-chunking-embeddings",
+    title: "Chunking for support docs",
+    prompt:
+      "Explain how you would chunk 10k support articles for RAG: size, overlap, metadata, and how you validate it.",
+    expectedAnswer:
+      "Chunk by section around 500 tokens with overlap, attach metadata filters, use hybrid search with rerank, and A/B recall on real questions.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "TECHNICAL_EXPLANATION",
+    interviewWeight: 4,
+    keyPoints:
+      "Section-aware chunks around 500 tokens\nOverlap to preserve split context\nMetadata for product and version filters\nValidate with recall on real questions",
+    commonMisconceptions:
+      "Whole docs always retrieve best\nChunking needs no evaluation\nMetadata never helps",
+    followUpPrompt: "What do you do when tables split across chunks?",
+    followUpExpected:
+      "Keep tables whole or attach neighboring context.",
+  },
+  {
+    skillSlug: "ai-engineering",
+    topicSlug: "aieng-agents-cost",
+    title: "Runaway agent spend",
+    prompt:
+      "A research agent loops over tools and burns $500 overnight with no guardrails. How do you control cost and latency?",
+    expectedAnswer:
+      "Cap steps and spend, require tool allowlists and confirmations, cache and summarize context, and alert on budget burn.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "SCENARIO",
+    interviewWeight: 4,
+    keyPoints:
+      "Max steps tokens and dollar budget per run\nTool allowlists with confirmations for writes\nCache results and summarize context\nAlerts and kill switches on burn rate",
+    commonMisconceptions:
+      "More steps always mean better answers\nCost controls hurt quality by default\nLogs alone prevent loops",
+    followUpPrompt: "How do you keep quality after capping steps?",
+    followUpExpected:
+      "Eval set on task success plus scoped sub-agents.",
+  },
+  {
+    skillSlug: "ai-evaluation",
+    topicSlug: "aieval-eval-sets-regressions",
+    title: "Build an eval harness",
+    prompt:
+      "Write a minimal eval runner that grades model outputs against expected answers.\n```ts\nasync function runEvals(cases: { input: string; expected: string }[], solve: (i: string) => Promise<string>) {\n  // your code here: return { passRate: number; failures: unknown[] }\n}\n```",
+    expectedAnswer:
+      "Loop cases with fixed seeds, normalize and compare outputs, collect failures with inputs, and return the pass rate.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "CODING",
+    interviewWeight: 3,
+    keyPoints:
+      "Fixed inputs and seeds for repeatability\nNormalize outputs before comparing\nCollect failures with inputs and diffs\nReturn pass rate plus failure list",
+    commonMisconceptions:
+      "One aggregate score is enough\nRandom live data makes good evals\nFailures need no stored examples",
+    followUpPrompt: "How do you grade open-ended answers?",
+    followUpExpected:
+      "Rubric judge with agreement checks on samples.",
+  },
+  {
+    skillSlug: "ai-evaluation",
+    topicSlug: "aieval-metrics",
+    title: "Score a classifier",
+    prompt:
+      "Write precision and recall for binary labels, then explain when you optimize each.\n```ts\nfunction pr(yTrue: number[], yPred: number[]): { precision: number; recall: number } {\n  // your code here\n}\n```",
+    expectedAnswer:
+      "Precision is true positives over predicted positives and recall over actual positives; optimize precision for spam flags and recall for disease screening.",
+    difficulty: "INTERMEDIATE",
+    category: "TECHNICAL",
+    format: "CODING",
+    interviewWeight: 3,
+    keyPoints:
+      "Count true positives false positives false negatives\nPrecision over predicted positives\nRecall over actual positives\nChoose by cost of each error type",
+    commonMisconceptions:
+      "Accuracy suffices for rare classes\nPrecision and recall are the same\nThresholds never matter",
+    followUpPrompt: "How do you pick the threshold?",
+    followUpExpected:
+      "Sweep it against the cost-weighted F score.",
   },
 ];

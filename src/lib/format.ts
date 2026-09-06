@@ -1,5 +1,22 @@
 // Small pure formatting helpers shared by server and client components.
 
+import type { MasteryBand } from "@/features/learning-engine";
+
+export function bandLabel(band: MasteryBand): string {
+  switch (band) {
+    case "RED":
+      return "Weak";
+    case "YELLOW":
+      return "Developing";
+    case "GREEN":
+      return "Solid";
+    case "BLUE":
+      return "Strong";
+    case "MASTERED":
+      return "Mastered";
+  }
+}
+
 export function timeAgo(iso: string, now: Date = new Date()): string {
   const then = new Date(iso).getTime();
   const diffMs = now.getTime() - then;

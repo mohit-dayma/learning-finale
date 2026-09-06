@@ -136,84 +136,106 @@ export async function getDashboardData(
   const weekAgo = new Date(now.getTime() - 7 * DAY_MS);
   const mistakeCutoff = new Date(now.getTime() - MISTAKE_WINDOW_DAYS * DAY_MS);
 
-  const [topics, masteryRows, answers, reviews, mistakes, sessions, interviewCounts] =
-    await Promise.all([
-      db.topic.findMany({
-        orderBy: [{ skill: { order: "asc" } }, { order: "asc" }],
-        select: {
-          id: true,
-          slug: true,
-          name: true,
-          skill: { select: { slug: true, name: true } },
-        },
-      }),
-      db.topicMastery.findMany({
-        where: { userId },
-        select: { topicId: true, score: true, lastStudiedAt: true },
-      }),
-      db.answer.findMany({
-        where: { userId },
-        orderBy: { createdAt: "desc" },
-        select: {
-          isCorrect: true,
-          usedAi: true,
-          aiAssistLevel: true,
-          createdAt: true,
-          question: { select: { topicId: true } },
-        },
-      }),
-      db.review.findMany({
-        where: { userId, status: "DUE" },
-        orderBy: { dueAt: "asc" },
-        select: {
-          id: true,
-          dueAt: true,
-          topicId: true,
-          questionId: true,
-          topic: { select: { name: true, skill: { select: { name: true } } } },
-          question: {
-            select: {
-              prompt: true,
-              topic: { select: { name: true, skill: { select: { name: true } } } },
-            },
+  const [
+    topics,
+    masteryRows,
+    answers,
+    reviews,
+    mistakes,
+    sessions,
+    interviewCounts,
+    mistakeCounts,
+    recentMistakeCounts,
+  ] = await Promise.all([
+    db.topic.findMany({
+      orderBy: [{ skill: { order: "asc" } }, { order: "asc" }],
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        skill: { select: { slug: true, name: true } },
+      },
+    }),
+    db.topicMastery.findMany({
+      where: { userId },
+      select: { topicId: true, score: true, lastStudiedAt: true },
+    }),
+    db.answer.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      select: {
+        isCorrect: true,
+        usedAi: true,
+        aiAssistLevel: true,
+        createdAt: true,
+        question: { select: { topicId: true } },
+      },
+    }),
+    db.review.findMany({
+      where: { userId, status: "DUE" },
+      orderBy: { dueAt: "asc" },
+      select: {
+        id: true,
+        dueAt: true,
+        topicId: true,
+        questionId: true,
+        topic: { select: { name: true, skill: { select: { name: true } } } },
+        question: {
+          select: {
+            prompt: true,
+            topic: { select: { name: true, skill: { select: { name: true } } } },
           },
         },
-      }),
-      db.mistake.findMany({
-        where: { userId, isResolved: false },
-        orderBy: { createdAt: "desc" },
-        take: 5,
-        select: {
-          id: true,
-          note: true,
-          createdAt: true,
-          questionId: true,
-          topic: { select: { name: true, skill: { select: { name: true } } } },
-          question: {
-            select: {
-              topic: { select: { name: true, skill: { select: { name: true } } } },
-            },
+      },
+    }),
+    db.mistake.findMany({
+      where: { userId, isResolved: false },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      select: {
+        id: true,
+        note: true,
+        createdAt: true,
+        questionId: true,
+        topic: { select: { name: true, skill: { select: { name: true } } } },
+        question: {
+          select: {
+            topic: { select: { name: true, skill: { select: { name: true } } } },
           },
         },
-      }),
-      db.learningSession.findMany({
-        where: { userId },
-        orderBy: { startedAt: "desc" },
-        take: 20,
-        select: {
-          id: true,
-          status: true,
-          startedAt: true,
-          endedAt: true,
-          skill: { select: { name: true } },
-          answers: { select: { isCorrect: true } },
-        },
-      }),
-      db.interviewQuestion.groupBy({
-        by: ["topicId"],
-        _count: { topicId: true },
-      }),
-    ]);
+      },
+    }),
+    db.learningSession.findMany({
+      where: { userId },
+      orderBy: { startedAt: "desc" },
+      take: 20,
+      select: {
+        id: true,
+        status: true,
+        startedAt: true,
+        endedAt: true,
+        skill: { select: { name: true } },
+        answers: { select: { isCorrect: true } },
+      },
+    }),
+    db.interviewQuestion.groupBy({
+      by: ["topicId"],
+      _count: { topicId: true },
+    }),
+    // Unresolved + recent mistake counts need the full per-topic picture,
+    // not just the 5 shown above. Grouped here so every dashboard query
+    // runs in the same parallel batch.
+    db.mistake.groupBy({
+      by: ["topicId"],
+      where: { userId, isResolved: false },
+      _count: { topicId: true },
+    }),
+    db.mistake.groupBy({
+      by: ["topicId"],
+      where: { userId, isResolved: false, createdAt: { gte: mistakeCutoff } },
+      _count: { topicId: true },
+    }),
+  ]);
 
   const masteryByTopic = new Map(masteryRows.map((m) => [m.topicId, m]));
   const interviewByTopic = new Map(
@@ -241,22 +263,9 @@ export async function getDashboardData(
   const unresolvedByTopic = new Map<string, number>();
   const recentMistakesByTopic = new Map<string, number>();
 
-  // Unresolved + recent mistake counts need the full per-topic picture,
-  // not just the 5 shown. The mistake table is small per user, so one
-  // extra query here is cheaper than complicating the query above.
-  const mistakeCounts = await db.mistake.groupBy({
-    by: ["topicId"],
-    where: { userId, isResolved: false },
-    _count: { topicId: true },
-  });
   for (const row of mistakeCounts) {
     if (row.topicId) unresolvedByTopic.set(row.topicId, row._count.topicId);
   }
-  const recentMistakeCounts = await db.mistake.groupBy({
-    by: ["topicId"],
-    where: { userId, isResolved: false, createdAt: { gte: mistakeCutoff } },
-    _count: { topicId: true },
-  });
   for (const row of recentMistakeCounts) {
     if (row.topicId) recentMistakesByTopic.set(row.topicId, row._count.topicId);
   }

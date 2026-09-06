@@ -10,6 +10,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/dal";
 import { db } from "@/lib/db";
 import {
+  buildMistakeRecord,
   levelMeansAiHelp,
   processAttempt,
   usedAiToLevel,
@@ -22,6 +23,7 @@ import type {
 } from "@/generated/prisma/enums";
 
 const MAX_NOTE_LENGTH = 1000;
+const MAX_TEXT_LENGTH = 5000;
 
 export interface AttemptMeta {
   confidence: number | null; // 1-5, null = not rated
@@ -287,7 +289,6 @@ async function maybeCreateMistake(args: {
   // priorWrong includes the just-stored wrong row when isCorrect=false,
   // so subtract it to get the count before this attempt.
   const priorBefore = args.isCorrect ? priorWrong : Math.max(0, priorWrong - 1);
-  const { buildMistakeRecord } = await import("@/features/learning-engine");
   const record = buildMistakeRecord({
     question: args.questionText,
     userAnswer: args.userAnswer,
@@ -423,6 +424,9 @@ export async function revealTextExplanation(
   if (input.textAnswer.trim().length === 0) {
     throw new Error("Write your answer first, then reveal the explanation.");
   }
+  if (input.textAnswer.length > MAX_TEXT_LENGTH) {
+    throw new Error(`Answer must be under ${MAX_TEXT_LENGTH} characters.`);
+  }
   const question = await db.question.findUnique({
     where: { id: input.questionId },
     select: { id: true, explanation: true },
@@ -440,6 +444,9 @@ export async function submitTextSelfMark(input: SubmitTextInput): Promise<Submit
   checkId(input.questionId, "Question");
   if (input.textAnswer.trim().length === 0) {
     throw new Error("Write your answer first, then submit.");
+  }
+  if (input.textAnswer.length > MAX_TEXT_LENGTH) {
+    throw new Error(`Answer must be under ${MAX_TEXT_LENGTH} characters.`);
   }
   checkMeta(input);
   const now = new Date();

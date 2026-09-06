@@ -1,23 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { WeakTopic } from "@/features/dashboard/queries";
-import type { MasteryBand } from "@/features/learning-engine";
-import { formatPercent } from "@/lib/format";
-
-function bandLabel(band: MasteryBand): string {
-  switch (band) {
-    case "RED":
-      return "Weak";
-    case "YELLOW":
-      return "Developing";
-    case "GREEN":
-      return "Solid";
-    case "BLUE":
-      return "Strong";
-    case "MASTERED":
-      return "Mastered";
-  }
-}
+import { bandLabel, formatPercent } from "@/lib/format";
 
 export function WeakAreasCard({ areas }: { areas: WeakTopic[] }): React.JSX.Element {
   return (

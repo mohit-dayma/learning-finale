@@ -194,7 +194,7 @@ export async function submitInterviewAnswer(
           explanation: record.explanation,
           whyWrong: record.whyWrong,
           mentalModel: record.mentalModel,
-          severity: "MEDIUM",
+          severity: record.severity,
           repeatCount: record.repeatCount,
           nextReviewAt: record.nextReview,
         },

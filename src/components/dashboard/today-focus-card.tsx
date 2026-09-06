@@ -3,22 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { TodayFocus } from "@/features/dashboard/queries";
-import type { MasteryBand } from "@/features/learning-engine";
-
-export function bandLabel(band: MasteryBand): string {
-  switch (band) {
-    case "RED":
-      return "Weak";
-    case "YELLOW":
-      return "Developing";
-    case "GREEN":
-      return "Solid";
-    case "BLUE":
-      return "Strong";
-    case "MASTERED":
-      return "Mastered";
-  }
-}
+import { bandLabel } from "@/lib/format";
 
 export function TodayFocusCard({ focus }: { focus: TodayFocus }): React.JSX.Element {
   const { recommendation, question } = focus;

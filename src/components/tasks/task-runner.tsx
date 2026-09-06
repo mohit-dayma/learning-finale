@@ -24,6 +24,7 @@ import { AI_ASSIST_LABELS, AI_ASSIST_LEVELS } from "@/features/learning-engine";
 import type { AiAssistLevel } from "@/features/learning-engine";
 
 const CONFIDENCE_OPTIONS = [1, 2, 3, 4, 5] as const;
+const MAX_TEXT_LENGTH = 5000;
 const EXPLANATION_FALLBACK =
   "No explanation was provided for this question yet. Review the topic material and try a related task.";
 
@@ -427,6 +428,7 @@ export function TaskRunner({ task }: { task: TaskData }) {
                   placeholder="Write your answer from memory"
                   required
                   minLength={1}
+                  maxLength={MAX_TEXT_LENGTH}
                   value={textAnswer}
                   onChange={(e) => setTextAnswer(e.target.value)}
                 />
