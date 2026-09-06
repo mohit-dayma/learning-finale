@@ -1,4 +1,5 @@
-import { PrismaNeon } from "@prisma/adapter-neon";
+import { Pool } from "pg";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 
 const globalForPrisma = globalThis as unknown as {
@@ -9,10 +10,14 @@ function createPrismaClient(): PrismaClient {
   const connectionString = process.env["DATABASE_URL"];
   if (!connectionString) {
     throw new Error(
-      'Missing required environment variable "DATABASE_URL". Copy ".env.example" to ".env" and set it to your Neon pooled connection string.',
+      'Missing required environment variable "DATABASE_URL". Copy ".env.example" to ".env" and set it to your Postgres connection string.',
     );
   }
-  const adapter = new PrismaNeon({ connectionString });
+  // Plain `pg` pool works with local Postgres and with Neon
+  // (direct or pooled). The Neon serverless driver only works
+  // with Neon endpoints, so it cannot be the default here.
+  const pool = new Pool({ connectionString });
+  const adapter = new PrismaPg(pool);
   return new PrismaClient({ adapter });
 }
 
