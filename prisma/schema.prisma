@@ -90,22 +90,83 @@ enum ApplicationStatus {
 
 // ------------------------------------------------------------------
 // User — the learner. Everything personal hangs off this table.
+//
+// Better Auth fields (emailVerified, image) + relations (sessions,
+// accounts) extend this table. Password hashes live in Account.password
+// (providerId "credential"), never in User. All personal rows cascade:
+// deleting a user wipes their history and their auth sessions.
 // ------------------------------------------------------------------
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Better Auth relations (server-managed sessions).
+  sessions Session[]
+  accounts Account[]
 
   // Personal data. All cascade: deleting a user wipes their history.
-  sessions     LearningSession[]
+  sessionsHistory LearningSession[]
   answers      Answer[]
   reviews      Review[]
   mistakes     Mistake[]
   mastery      TopicMastery[]
   studyPlans   StudyPlan[]
   applications CareerApplication[]
+}
+
+// ------------------------------------------------------------------
+// Better Auth tables — server-managed sessions/cookies.
+// The session token lives in an httpOnly cookie. The browser never
+// sees passwords or secrets. Nothing auth-related goes to localStorage.
+// ------------------------------------------------------------------
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId             String
+  providerId            String
+  accessToken           String?   @db.Text
+  refreshToken          String?   @db.Text
+  idToken               String?   @db.Text
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?   @db.Text
+  password              String?   @db.Text // scrypt hash for email+password (providerId "credential")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String   @db.Text
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([identifier, value])
 }
 
 // ------------------------------------------------------------------
