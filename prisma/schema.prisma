@@ -101,6 +101,14 @@ enum InterviewCategory {
   SYSTEM_DESIGN
 }
 
+enum InterviewFormat {
+  TECHNICAL_EXPLANATION
+  CODING
+  DEBUGGING
+  DESIGN
+  SCENARIO
+}
+
 enum ApplicationStatus {
   WISHLIST
   APPLIED
@@ -140,6 +148,7 @@ model User {
   mastery      TopicMastery[]
   studyPlans   StudyPlan[]
   applications CareerApplication[]
+  interviewAttempts InterviewAttempt[]
 }
 
 // ------------------------------------------------------------------
@@ -464,6 +473,15 @@ model StudyPlanItem {
 // InterviewQuestion — interview prep, separate from practice Question.
 // Practice questions test knowledge; these model real interview prompts
 // (company, category, expected answer outline).
+//
+// Selection (see features/interview/select.ts) weights: weak areas
+// (low TopicMastery score), interview importance (interviewWeight 1-5),
+// recent mistakes, and topic mastery. Format covers the 5 supported
+// prompt kinds: explanation, coding, debugging, design, real-world
+// scenario. keyPoints / commonMisconceptions / followUp* drive the
+// post-submit feedback flow: expected answer -> what was correct ->
+// what was missed -> misconceptions -> follow-up (answers never
+// revealed before submit; see features/interview/queries.ts).
 // ------------------------------------------------------------------
 model InterviewQuestion {
   id              String            @id @default(cuid())
@@ -476,18 +494,53 @@ model InterviewQuestion {
   expectedAnswer  String?           @db.Text // outline, not a full script
   difficulty      Difficulty        @default(INTERMEDIATE)
   category        InterviewCategory @default(TECHNICAL)
+  format          InterviewFormat   @default(TECHNICAL_EXPLANATION)
+  interviewWeight Int               @default(3) // 1-5 interview importance
+  keyPoints       String?           @db.Text // newline-separated points a good answer covers
+  commonMisconceptions String?      @db.Text // newline-separated misconceptions to check
+  followUpPrompt  String?           @db.Text
+  followUpExpected String?          @db.Text
   company         String?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
+
+  attempts InterviewAttempt[]
 
   @@index([skillId])
   @@index([topicId])
   @@index([difficulty])
   @@index([category])
+  @@index([format])
+}
+
+// ------------------------------------------------------------------
+// InterviewAttempt — one user answer to an interview question.
+// Stored so mistakes can feed back into the learning system: on a
+// wrong/self-marked-wrong attempt the server action also creates a
+// Mistake row (topicId + questionText/userAnswer/correctAnswer) and
+// updates TopicMastery + Review, so dashboard weak areas react.
+// ------------------------------------------------------------------
+model InterviewAttempt {
+  id         String            @id @default(cuid())
+  userId     String
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questionId String
+  question   InterviewQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  userAnswer String            @db.Text
+  isCorrect  Boolean
+  // Self-reported breakdown filled at submit time (drives feedback UI).
+  whatCorrect String?          @db.Text
+  whatMissed  String?          @db.Text
+  createdAt  DateTime          @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([questionId])
 }
 
 // ------------------------------------------------------------------
 // CareerApplication — job applications for the user.
+// Kept deliberately simple (not a CRM): company, role, job URL,
+// status, date applied, free notes, skills required, interview notes.
 // ------------------------------------------------------------------
 model CareerApplication {
   id        String            @id @default(cuid())
@@ -498,6 +551,8 @@ model CareerApplication {
   status    ApplicationStatus @default(WISHLIST)
   jobUrl    String?
   notes     String?           @db.Text
+  skillsRequired String?      @db.Text // comma/newline-separated skills, kept as text
+  interviewNotes String?      @db.Text
   appliedAt DateTime?
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt

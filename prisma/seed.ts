@@ -27,6 +27,7 @@ async function main() {
   await db.studyPlanItem.deleteMany();
   await db.studyPlan.deleteMany();
   await db.careerApplication.deleteMany();
+  await db.interviewAttempt.deleteMany();
   await db.interviewQuestion.deleteMany();
   await db.topicMastery.deleteMany();
   await db.questionOption.deleteMany();
@@ -40,7 +41,7 @@ async function main() {
     data: { email: "demo@skillforge.app", name: "Demo Learner" },
   });
 
-  // -- Skills (8: JS, TS, React, Next.js, DSA, Backend, PG, AI) -----
+  // -- Skills (11: JS, TS, React, Next.js, DSA, Backend, PG, AI + 3 interview-only) -----
   const skills = await db.skill.createManyAndReturn({
     data: [
       { slug: "javascript", name: "JavaScript", description: "Core JS: scope, closures, async.", order: 1 },
@@ -51,11 +52,14 @@ async function main() {
       { slug: "backend", name: "Backend", description: "Node.js APIs, REST, auth.", order: 6 },
       { slug: "postgresql", name: "PostgreSQL", description: "SQL, joins, indexes, transactions.", order: 7 },
       { slug: "ai", name: "AI", description: "Prompts, embeddings, RAG basics.", order: 8 },
+      { slug: "system-design", name: "System Design", description: "Scale, reliability, trade-offs.", order: 9 },
+      { slug: "ai-engineering", name: "AI Engineering", description: "RAG, agents, LLM production.", order: 10 },
+      { slug: "ai-evaluation", name: "AI Evaluation", description: "Judges, eval sets, regressions.", order: 11 },
     ],
   });
   const bySlug = Object.fromEntries(skills.map((s) => [s.slug, s]));
 
-  // -- Topics (10) ---------------------------------------------------
+  // -- Topics (13: 10 practice + 3 interview-only) ---------------
   const topicRows = [
     { skill: "javascript", slug: "js-closures-scope", name: "Closures and Scope", description: "How closures keep state.", order: 1 },
     { skill: "typescript", slug: "ts-types-narrowing", name: "Types and Narrowing", description: "Model data and narrow unions.", order: 1 },
@@ -67,6 +71,9 @@ async function main() {
     { skill: "postgresql", slug: "pg-joins-indexes", name: "Joins and Indexes", description: "Join tables, speed up queries.", order: 1 },
     { skill: "ai", slug: "ai-prompt-embed", name: "Prompting and Embeddings", description: "Clear prompts and vectors.", order: 1 },
     { skill: "ai", slug: "ai-rag-basics", name: "RAG Basics", description: "Retrieve context, reduce hallucinations.", order: 2 },
+    { skill: "system-design", slug: "sys-scale-basics", name: "Scaling Basics", description: "Load, queues, fallbacks.", order: 1 },
+    { skill: "ai-engineering", slug: "aieng-rag-prod", name: "RAG in Production", description: "Index, retrieve, generate, control cost.", order: 1 },
+    { skill: "ai-evaluation", slug: "aieval-judges", name: "Judges and Eval Sets", description: "Rubrics, agreement, regressions.", order: 1 },
   ];
   const topics = [];
   for (const t of topicRows) {
@@ -369,7 +376,9 @@ async function main() {
     ],
   });
 
-  // -- Interview question ---------------------------------------------------------
+  // -- Interview questions (full bank: 10 categories x 5 formats) -----
+  // Keep the original React question, then load the shared bank from
+  // src/features/interview/seed-data.ts so app + seed never drift.
   await db.interviewQuestion.create({
     data: {
       skillId: bySlug["react"]!.id,
@@ -379,8 +388,45 @@ async function main() {
       expectedAnswer: "Check state scope, memo rows, use keys, virtualize the list, memoize the filter.",
       difficulty: "INTERMEDIATE",
       category: "TECHNICAL",
+      format: "TECHNICAL_EXPLANATION",
+      interviewWeight: 4,
+      keyPoints: "Check state scope\nMemo rows\nUse keys\nVirtualize the list\nMemoize the filter",
+      commonMisconceptions: "Re-renders always mean slow code\nKeys fix all list problems",
+      followUpPrompt: "When would you reach for virtualization over memoization?",
+      followUpExpected: "When the list is too large to render all rows even once.",
     },
   });
+  const { INTERVIEW_SEED_QUESTIONS } = await import(
+    "../src/features/interview/seed-data.js"
+  );
+  // Null topicSlugs in the bank resolve to the interview-only topics above.
+  const fallbackTopic: Record<string, string> = {
+    "system-design": "sys-scale-basics",
+    "ai-engineering": "aieng-rag-prod",
+    "ai-evaluation": "aieval-judges",
+  };
+  for (const q of INTERVIEW_SEED_QUESTIONS) {
+    const skill = bySlug[q.skillSlug];
+    if (!skill) throw new Error(`Seed: unknown skill ${q.skillSlug}`);
+    const resolvedTopic = q.topicSlug ?? fallbackTopic[q.skillSlug] ?? null;
+    await db.interviewQuestion.create({
+      data: {
+        skillId: skill.id,
+        topicId: resolvedTopic ? topicBySlug[resolvedTopic]!.id : null,
+        title: q.title,
+        prompt: q.prompt,
+        expectedAnswer: q.expectedAnswer,
+        difficulty: q.difficulty,
+        category: q.category,
+        format: q.format,
+        interviewWeight: q.interviewWeight,
+        keyPoints: q.keyPoints,
+        commonMisconceptions: q.commonMisconceptions,
+        followUpPrompt: q.followUpPrompt,
+        followUpExpected: q.followUpExpected,
+      },
+    });
+  }
 
   // -- Career application ------------------------------------------------------------
   await db.careerApplication.create({
@@ -389,8 +435,11 @@ async function main() {
       company: "Acme Web",
       role: "Junior Full-Stack Developer",
       status: "APPLIED",
+      jobUrl: "https://example.com/jobs/junior-full-stack",
       appliedAt: new Date("2026-09-05T00:00:00Z"),
       notes: "Stack is React, Next.js, Postgres. Referenced SkillForge study plan.",
+      skillsRequired: "React, Next.js, PostgreSQL",
+      interviewNotes: "Screening call Sep 10: focus on hooks + App Router.",
     },
   });
 
@@ -402,9 +451,11 @@ async function main() {
     db.answer.count(),
     db.review.count(),
     db.mistake.count(),
+    db.interviewQuestion.count(),
+    db.careerApplication.count(),
   ]);
   console.log(
-    `Seed ok — skills=${counts[0]} topics=${counts[1]} questions=${counts[2]} options=${counts[3]} answers=${counts[4]} reviews=${counts[5]} mistakes=${counts[6]}`,
+    `Seed ok — skills=${counts[0]} topics=${counts[1]} questions=${counts[2]} options=${counts[3]} answers=${counts[4]} reviews=${counts[5]} mistakes=${counts[6]} interviews=${counts[7]} applications=${counts[8]}`,
   );
 }
 
