@@ -311,6 +311,11 @@ model Answer {
   selectedOption   QuestionOption? @relation(fields: [selectedOptionId], references: [id], onDelete: SetNull)
   textAnswer       String?         @db.Text // for SHORT_ANSWER / CODE
   isCorrect        Boolean
+  // Attempt metadata, recorded on the task page at submit time.
+  // Nullable = unknown (older rows predate this feature).
+  confidence          Int? // 1-5 self-rated confidence
+  usedAi              Boolean     @default(false) // AI helped produce the answer
+  perceivedDifficulty Difficulty? // how hard the question felt to the learner
   createdAt        DateTime        @default(now())
 
   // One answer row = one attempt. No unique constraint on purpose:

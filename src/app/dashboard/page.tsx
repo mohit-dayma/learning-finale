@@ -1,44 +1,51 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { LogoutButton } from "@/components/auth/logout-button";
+import { AppHeader } from "@/components/layout/app-header";
+import { TodayFocusCard } from "@/components/dashboard/today-focus-card";
+import { ReviewsCard } from "@/components/dashboard/reviews-card";
+import { WeakAreasCard } from "@/components/dashboard/weak-areas-card";
+import { RecentMistakesCard } from "@/components/dashboard/recent-mistakes-card";
+import { ProgressCard } from "@/components/dashboard/progress-card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getDashboardData } from "@/features/dashboard/queries";
 import { getCurrentUser, requireUser } from "@/lib/dal";
-import { db } from "@/lib/db";
 
-// Protected area. proxy.ts redirects guests (optimistic check).
-// requireUser() runs the secure check here (authorization).
-export default async function DashboardPage() {
-  const sessionUser = await requireUser();
-  const user = await getCurrentUser();
-
-  // Authorization: every query filters by the session user id.
-  // A user can read only rows that carry their own id.
-  const [sessionCount, planCount, mistakeCount] = await Promise.all([
-    db.learningSession.count({ where: { userId: sessionUser.id } }),
-    db.studyPlan.count({ where: { userId: sessionUser.id } }),
-    db.mistake.count({ where: { userId: sessionUser.id, isResolved: false } }),
-  ]);
+export default async function DashboardPage(): Promise<React.JSX.Element> {
+  const user = await requireUser();
+  const profile = await getCurrentUser();
+  const displayName = profile?.name ?? user.name ?? user.email;
+  const data = await getDashboardData(user.id, displayName);
+  const today = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-6">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Dashboard</CardTitle>
-          <CardDescription>
-            Signed in as {user?.name ?? sessionUser.name} ({user?.email ?? sessionUser.email})
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <ul className="text-sm">
-            <li>Learning sessions (yours): {sessionCount}</li>
-            <li>Study plans (yours): {planCount}</li>
-            <li>Open mistakes (yours): {mistakeCount}</li>
-          </ul>
-          <p className="text-sm text-muted-foreground">
-            Auth proves who you are. Each count above filters by your id, so you see only your
-            data. That filter is authorization.
-          </p>
-          <LogoutButton />
-        </CardContent>
-      </Card>
-    </main>
+    <div className="min-h-screen bg-background">
+      <AppHeader userName={displayName} userEmail={profile?.email ?? user.email} />
+      <main className="mx-auto max-w-5xl space-y-6 p-6">
+        <div>
+          <h1 className="text-2xl font-semibold">Today</h1>
+          <p className="text-sm text-muted-foreground">{today}</p>
+        </div>
+        {data.focus ? (
+          <TodayFocusCard focus={data.focus} />
+        ) : (
+          <Card>
+            <CardHeader>
+              <CardTitle>Today&apos;s focus</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                No recommendation yet. Answer questions to get a focus topic.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+        <ReviewsCard reviews={data.reviews} />
+        <WeakAreasCard areas={data.weakAreas} />
+        <RecentMistakesCard mistakes={data.mistakes} />
+        <ProgressCard progress={data.progress} />
+      </main>
+    </div>
   );
 }
